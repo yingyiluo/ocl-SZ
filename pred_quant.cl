@@ -23,15 +23,15 @@
 
 __attribute__((task))
 __kernel void pred_and_quant(int r1, int r2, int r3, 
-							int intvCapacity, int intvRadius,
-							float mean,
-							double realPrecision,
-							__global float *restrict oriData,
-							__global float *restrict reg_params,
-							__global unsigned char *restrict indicator,
-							__global float *restrict unpredictable_data,   //output
-							__global int *restrict blockwise_unpred_count, //output
-							__global int *restrict type)                   //output
+			int intvCapacity, int intvRadius,
+			float mean,
+			double realPrecision,
+			__global float *restrict oriData,
+			__global float *restrict reg_params,
+			__global unsigned char *restrict indicator,
+			__global float *restrict unpredictable_data,   //output
+			__global int *restrict blockwise_unpred_count, //output
+			__global int *restrict type)                   //output
 {
 	// calculate block dims
 	int num_x = (r1 - 1) / BLOCK_SIZE + 1;
