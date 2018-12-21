@@ -66,7 +66,7 @@ __kernel void pred_and_quant(int r1, int r2, int r3,
 			j = 0;
 			k = 0;
 		}
-		float pred_buffer_pos[BLOCK_NUM_ELE] = {0};
+		float pred_buffer_pos[BLOCK_NUM_ELE] = {0.0f};
 		int idx = PB_BLOCK_SIZE * PB_BLOCK_SIZE + PB_BLOCK_SIZE + 1;
 		int ii = 0, jj = 0, kk = 0;
 		for(int m = 0; m < BLOCK_NUM_ELE; m++) {
