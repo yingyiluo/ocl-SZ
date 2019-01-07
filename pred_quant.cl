@@ -52,10 +52,37 @@ __kernel void pred_and_quant(int r1, int r2, int r3,
 	int intvCapacity_sz = intvCapacity - 2;
 	int total_unpred = 0;
 	int reg_params_pos = 0;
-
 	int i = 0, j = 0, k = 0;
 	for(int n = 0; n < num_blocks; n++) {
 		int data_pos = i * BLOCK_SIZE * dim0_offset + j * BLOCK_SIZE * dim1_offset + k * BLOCK_SIZE;
+		float pred_buffer_pos[PB_BLOCK_SIZE * PB_BLOCK_SIZE * PB_BLOCK_SIZE] = {0.0f};
+		int idx = PB_BLOCK_SIZE * PB_BLOCK_SIZE + PB_BLOCK_SIZE + 1;
+		int ii = 0, jj = 0, kk = 0;
+		int x = 0, y = 0, z = 0;
+		for(int m = 0; m < BLOCK_NUM_ELE; m++) {
+			int pos = data_pos + x * dim0_offset + y * dim1_offset + z;
+			z = (k * BLOCK_SIZE + kk + 1 < r3) ? z + 1 : z;
+			pred_buffer_pos[idx] = oriData[pos];
+			idx += 1;
+			kk += 1; 
+			if(kk == BLOCK_SIZE) {
+				z = 0;
+				y = (j * BLOCK_SIZE + jj + 1 < r2) ? y + 1 : y;
+				jj += 1;
+				kk = 0;
+				idx += 1;
+			}
+			if(jj == BLOCK_SIZE) {
+				z = 0;
+				y = 0;
+				x = (i * BLOCK_SIZE + ii + 1 < r1) ? x + 1 : x;
+				ii += 1;
+				jj = 0;
+				kk = 0;
+				idx += PB_BLOCK_SIZE;
+			}
+		}
+
 		k += 1;
 		if(k == num_z) {
 			j += 1;
@@ -65,26 +92,6 @@ __kernel void pred_and_quant(int r1, int r2, int r3,
 			i += 1;
 			j = 0;
 			k = 0;
-		}
-		float pred_buffer_pos[BLOCK_NUM_ELE] = {0.0f};
-		int idx = PB_BLOCK_SIZE * PB_BLOCK_SIZE + PB_BLOCK_SIZE + 1;
-		int ii = 0, jj = 0, kk = 0;
-		for(int m = 0; m < BLOCK_NUM_ELE; m++) {
-			int pos = data_pos + ii * dim0_offset + jj * dim1_offset + kk;
-			pred_buffer_pos[idx] = oriData[pos];
-			idx += 1;
-			kk += 1;
-			if(kk == BLOCK_SIZE) {
-				jj += 1;
-				kk = 0;
-				idx += 1;
-			}
-			if(jj == BLOCK_SIZE) {
-				ii += 1;
-				jj = 0;
-				kk = 0;
-				idx += PB_BLOCK_SIZE;
-			}
 		}
 
 		// When !(indicator[k]), use linear regression 
@@ -96,7 +103,7 @@ __kernel void pred_and_quant(int r1, int r2, int r3,
 		for(int m = 0; m < BLOCK_NUM_ELE; m++) {
 			float curData = pred_buffer_pos[idx];
 			float pred = indicator_n ? 
-						pred_buffer_pos[idx - 1] + pred_buffer_pos[idx - strip_dim1_offset]+ pred_buffer_pos[idx - strip_dim0_offset] - pred_buffer_pos[idx - strip_dim1_offset - 1]
+						pred_buffer_pos[idx - 1] + pred_buffer_pos[idx - strip_dim1_offset] + pred_buffer_pos[idx - strip_dim0_offset] - pred_buffer_pos[idx - strip_dim1_offset - 1]
 						- pred_buffer_pos[idx - strip_dim0_offset - 1] - pred_buffer_pos[idx - strip_dim0_offset - strip_dim1_offset] + pred_buffer_pos[idx - strip_dim0_offset - strip_dim1_offset - 1] 
 						: (reg_params[reg_params_pos] * ii + reg_params[reg_params_pos + params_offset_b] * jj + reg_params[reg_params_pos + params_offset_c] * kk + reg_params[reg_params_pos + params_offset_d]);									
 			double diff = curData - pred;
@@ -105,19 +112,22 @@ __kernel void pred_and_quant(int r1, int r2, int r3,
 			if (itvNum < stdIntvCap){
 				if (diff < 0) itvNum = -itvNum;
 				type_pos[m] = (int) (itvNum/2) + intvRadius;
-				pred = pred + 2 * (type_pos[m] - intvRadius) * realPrecision;
+				pred_buffer_pos[idx] = pred + 2 * (type_pos[m] - intvRadius) * realPrecision;
 				//ganrantee comporession error against the case of machine-epsilon
-				if(fabs(curData - pred) > realPrecision){	
+				if(fabs(curData - pred_buffer_pos[idx]) > realPrecision){	
 					type_pos[m] = 0;
+					pred_buffer_pos[idx] = curData;
 					unpredictable_data[total_unpred + block_unpredictable_count ++] = curData;
 				}		
 			}
 			else{
 				type_pos[m] = 0;
+				pred_buffer_pos[idx] = curData;
 				unpredictable_data[total_unpred + block_unpredictable_count ++] = curData;
 			}
-
+			
 			type_pos[m] = indicator_n && (fabs(curData - mean) <= realPrecision) ? 1 : type_pos[m];
+			pred_buffer_pos[idx] = indicator_n && (fabs(curData - mean) <= realPrecision) ? mean : pred_buffer_pos[idx];
 
 			idx += 1;
 			kk += 1;
