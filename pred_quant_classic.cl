@@ -126,9 +126,6 @@ __kernel void pred_and_quant(int r1, int r2, int r3,
 				unpredictable_data[total_unpred + block_unpredictable_count ++] = curData;
 			}
 			
-			type_pos[m] = indicator_n && (fabs(curData - mean) <= realPrecision) ? 1 : type_pos[m];
-			pred_buffer_pos[idx] = indicator_n && (fabs(curData - mean) <= realPrecision) ? mean : pred_buffer_pos[idx];
-
 			idx += 1;
 			kk += 1;
 			if(kk == BLOCK_SIZE) {
