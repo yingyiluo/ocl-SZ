@@ -98,11 +98,19 @@ public:
 #elif ENABLE_INTELGPU
 	bool loadprog(string fn) {
 		char *srcfile = loadfile(fn);
+		cl_int err = CL_SUCCESS;
+
 		if (! srcfile)
 			return false;
 		cl::Program::Sources src;
 		src.push_back({srcfile,strlen(srcfile)});
-		prgs.push_back(cl::Program(ctx,src));
+		cl::Program p(ctx, src, &err);
+		if (err != CL_SUCCESS) {
+			cout << "Program failed" << err << endl;
+			return false;
+		}
+		p.build(devs);
+		prgs.push_back(p);
 		return true;
         }
 #else
@@ -197,7 +205,17 @@ public:
 
 		queue = cl::CommandQueue(ctx, devs[device_id], 0, &err);
 		kernel = cl::Kernel(prgs[program_id], funcname, &err);
-		// check err
+		if (err != CL_SUCCESS) {
+			switch(err) {
+			case CL_INVALID_PROGRAM: cout << "CL_INVALID_PROGRAM\n"; break;
+			case CL_INVALID_PROGRAM_EXECUTABLE: cout << "CL_INVALID_PROGRAM_EXECUTABLE\n"; break;
+			case CL_INVALID_KERNEL_NAME: cout << "CL_INVALID_KERNEL_NAME\n"; break;
+			case CL_INVALID_KERNEL_DEFINITION: cout << "CL_INVALID_KERNEL_DEFINITION\n"; break;
+			default:
+				cout << "cl::Kernel() failed:" << err << endl;
+			}
+			return false;
+		}
 		return true;
 	}
 
