@@ -6,6 +6,10 @@
 // 
 // Written by Kaz Yoshii <ky@anl.gov>
 //
+// Tested platform:
+// Intel OpenCL SDK for embedded GPUs
+// Intel OpenCL SDK for FPGAs (e.g., Nallatech 385A)
+//
 
 #include <sys/stat.h>
 #include <iostream>
@@ -44,7 +48,6 @@ private:
 	vector<cl::Device> devs;
 	vector<cl::Program> prgs;
 	cl::Context ctx;
-
 	int platform_id, device_id, program_id;
 
 	cl::Event kernel_event;
@@ -53,14 +56,15 @@ private:
 	vector<struct arg_struct> kargs;
 
 public:
-	bool buildprgsFromBinary(string fn) {
+	char *loadfile(string fn)
+	{
 		struct stat st;
 
 		stat(fn.c_str(), &st);
 
 		if (!S_ISREG(st.st_mode)) {
 			cout << fn << " is not a regular file!" << endl;
-			return false;
+			return NULL;
 		}
 
 		// load binary and build prgs
@@ -68,25 +72,42 @@ public:
 
 		if (! f0.good()) {
 			cout << "Unable to load " << fn << endl;
-			return false;
+			return NULL;
 		}
-
 		f0.seekg(0, f0.end);
 		cl_ulong sz = f0.tellg();
-		// cout << "size: " << sz << endl;
 
 		f0.seekg(0, f0.beg);
 	
-		char *f0c = new char [sz];
+		char *f0c = new char [sz+1];
 		f0.read(f0c, sz);
-
-		cl::Program::Binaries bin0;
-		bin0.push_back({f0c,sz});
-		prgs.push_back(cl::Program(ctx,devs,bin0));
-
-		return true;
+		f0c[sz] = 0;
+		return f0c;
 	}
 
+#ifdef ENABLE_INTELFPGA
+	bool loadprog(string fn) {
+		char *binfile = loadfile(fn);
+		if (! binfile)
+			return false;
+		cl::Program::Binaries bin;
+		bin.push_back({binfile,strlen(binfile)});
+		prgs.push_back(cl::Program(ctx,devs,bin));
+		return true;
+	}
+#elif ENABLE_INTELGPU
+	bool loadprog(string fn) {
+		char *srcfile = loadfile(fn);
+		if (! srcfile)
+			return false;
+		cl::Program::Sources src;
+		src.push_back({srcfile,strlen(srcfile)});
+		prgs.push_back(cl::Program(ctx,src));
+		return true;
+        }
+#else
+#error "Add -DENABLE_INTELFPGA or -DENABLE_INTELGPU to compiler options"
+#endif
 
 #ifdef AOCL_MMD_HACK
 	// technically this function should be called in other thread context
@@ -114,7 +135,18 @@ public:
 			return;
 		}
 
-		pfs[pid].getDevices(CL_DEVICE_TYPE_ALL, &devs);
+		platform_id = pid;
+#ifdef ENABLE_INTELGPU
+		for (int i = 0; i < (int)pfs.size(); i++) {
+			string pn = pfs[i].getInfo<CL_PLATFORM_NAME>();
+			if (pn.find("Intel Gen OCL") != string::npos) {
+				platform_id = i;
+				break;
+			}
+		}
+#endif
+
+		pfs[platform_id].getDevices(CL_DEVICE_TYPE_ALL, &devs);
 		if (devs.size() == 0) {
 			cout << "No device found" << endl;
 			return;
@@ -122,25 +154,44 @@ public:
 
 		ctx = devs;
 
-		platform_id = pid;
+
 		device_id = did;
 		program_id = 0; //
 	}
 
 	void listPlatforms(void) {
-		for (unsigned i = 0; i < pfs.size(); i++)
-			cout << "Platform" << i << ": " << pfs[i].getInfo<CL_PLATFORM_NAME>() << endl;
+		cout << "[Platforms]\n";
+		for (int i = 0; i < (int)pfs.size(); i++) {
+			cout << i << ": " << pfs[i].getInfo<CL_PLATFORM_NAME>();
+			if (i == platform_id) cout << " [selected]";
+			cout << endl;
+		}
 	}
 
 	void listDevices(void) {
-		for (unsigned i = 0; i < devs.size(); i++)
-			cout << "Device" << i << ": " << devs[i].getInfo<CL_DEVICE_NAME>() << endl;
+		cout << "[Devices]\n";
+		for (int i = 0; i < (int)devs.size(); i++) {
+			cout << "Device" << i << ": " << devs[i].getInfo<CL_DEVICE_NAME>();
+			if (i == device_id) cout << " [selected]";
+			cout << endl;
+		}
 	}
 
 	bool prepKernel(const char *filename, const char *funcname) {
 		cl_int err = CL_SUCCESS;
 
-		if (! buildprgsFromBinary(filename)) {
+		string fn = filename;
+		size_t pos = fn.find_last_of(".");
+
+		if (pos == std::string::npos) {
+#ifdef ENABLE_INTELFPGA
+			fn = fn + ".aocx";
+#elif  ENABLE_INTELGPU
+			fn = fn + ".cl";
+#endif
+		}
+
+		if (! loadprog(fn)) {
 			return false;
 		}
 
