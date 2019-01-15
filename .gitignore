@@ -1,4 +1,5 @@
 bin/
+myexps/
 *.aocx
 *.aoco
 *.output
