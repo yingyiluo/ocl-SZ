@@ -50,12 +50,15 @@ __kernel void pred_and_quant(int r1, int r2, int r3,
 	int strip_dim1_offset = PB_BLOCK_SIZE;
 	// invtCapacity is from external param: exe_params
 	int intvCapacity_sz = intvCapacity - 2;
-	int total_unpred = 0;
 	int reg_params_pos = 0;
 	int i = 0, j = 0, k = 0;
+	__local float pred_buffer_pos[PB_BLOCK_SIZE * PB_BLOCK_SIZE * PB_BLOCK_SIZE];
+	__local int type_pos[BLOCK_NUM_ELE];
+	__local float unpred_data_pos[BLOCK_NUM_ELE];
 	for(int n = 0; n < num_blocks; n++) {
 		int data_pos = i * BLOCK_SIZE * dim0_offset + j * BLOCK_SIZE * dim1_offset + k * BLOCK_SIZE;
-		float pred_buffer_pos[PB_BLOCK_SIZE * PB_BLOCK_SIZE * PB_BLOCK_SIZE] = {0.0f};
+		for(int m = 0; m < PB_BLOCK_SIZE * PB_BLOCK_SIZE * PB_BLOCK_SIZE; m++)
+			pred_buffer_pos[m] = 0;
 		int idx = PB_BLOCK_SIZE * PB_BLOCK_SIZE + PB_BLOCK_SIZE + 1;
 		int ii = 0, jj = 0, kk = 0;
 		int x = 0, y = 0, z = 0;
@@ -98,8 +101,9 @@ __kernel void pred_and_quant(int r1, int r2, int r3,
 		ii = 0, jj = 0, kk = 0;
 		idx = PB_BLOCK_SIZE * PB_BLOCK_SIZE + PB_BLOCK_SIZE + 1;
 		int block_unpredictable_count = 0;
-		float type_pos[BLOCK_NUM_ELE] = {0};
 		unsigned char indicator_n = indicator[n];
+		for(int m = 0; m < BLOCK_NUM_ELE; m++)
+			unpred_data_pos[m] = 0;
 		for(int m = 0; m < BLOCK_NUM_ELE; m++) {
 			float curData = pred_buffer_pos[idx];
 			float pred = indicator_n ? 
@@ -117,13 +121,13 @@ __kernel void pred_and_quant(int r1, int r2, int r3,
 				if(fabs(curData - pred_buffer_pos[idx]) > realPrecision){	
 					type_pos[m] = 0;
 					pred_buffer_pos[idx] = curData;
-					unpredictable_data[total_unpred + block_unpredictable_count ++] = curData;
+					unpred_data_pos[block_unpredictable_count ++] = curData;
 				}		
 			}
 			else{
 				type_pos[m] = 0;
 				pred_buffer_pos[idx] = curData;
-				unpredictable_data[total_unpred + block_unpredictable_count ++] = curData;
+				unpred_data_pos[block_unpredictable_count ++] = curData;
 			}
 			
 			idx += 1;
@@ -141,9 +145,10 @@ __kernel void pred_and_quant(int r1, int r2, int r3,
 			}
 		}
 		reg_params_pos = indicator_n ? reg_params_pos : (reg_params_pos + 1);
-		total_unpred += block_unpredictable_count;
 		blockwise_unpred_count[n] = block_unpredictable_count;
 		for(int m = 0; m < BLOCK_NUM_ELE; m++)
 			type[n * BLOCK_NUM_ELE + m]= type_pos[m];
+		for(int m = 0; m < BLOCK_NUM_ELE; m++)
+			unpredictable_data[n * BLOCK_NUM_ELE + m]= unpred_data_pos[m];
 	}
 }

@@ -53,9 +53,12 @@ __kernel void pred_and_quant(int r1, int r2, int r3,
 	int total_unpred = 0;
 	int reg_params_pos = 0;
 	int i = 0, j = 0, k = 0;
+	__local float pred_buffer_pos[PB_BLOCK_SIZE * PB_BLOCK_SIZE * PB_BLOCK_SIZE];
+	__local int type_pos[BLOCK_NUM_ELE];
 	for(int n = 0; n < num_blocks; n++) {
 		int data_pos = i * BLOCK_SIZE * dim0_offset + j * BLOCK_SIZE * dim1_offset + k * BLOCK_SIZE;
-		float pred_buffer_pos[PB_BLOCK_SIZE * PB_BLOCK_SIZE * PB_BLOCK_SIZE] = {0.0f};
+		for(int m = 0; m < PB_BLOCK_SIZE * PB_BLOCK_SIZE * PB_BLOCK_SIZE; m++)
+			pred_buffer_pos[m] = 0;
 		int idx = PB_BLOCK_SIZE * PB_BLOCK_SIZE + PB_BLOCK_SIZE + 1;
 		int ii = 0, jj = 0, kk = 0;
 		int x = 0, y = 0, z = 0;
@@ -98,7 +101,6 @@ __kernel void pred_and_quant(int r1, int r2, int r3,
 		ii = 0, jj = 0, kk = 0;
 		idx = PB_BLOCK_SIZE * PB_BLOCK_SIZE + PB_BLOCK_SIZE + 1;
 		int block_unpredictable_count = 0;
-		float type_pos[BLOCK_NUM_ELE] = {0};
 		unsigned char indicator_n = indicator[n];
 		for(int m = 0; m < BLOCK_NUM_ELE; m++) {
 			float curData = pred_buffer_pos[idx];
@@ -125,7 +127,7 @@ __kernel void pred_and_quant(int r1, int r2, int r3,
 				pred_buffer_pos[idx] = curData;
 				unpredictable_data[total_unpred + block_unpredictable_count ++] = curData;
 			}
-			
+
 			type_pos[m] = indicator_n && (fabs(curData - mean) <= realPrecision) ? 1 : type_pos[m];
 			pred_buffer_pos[idx] = indicator_n && (fabs(curData - mean) <= realPrecision) ? mean : pred_buffer_pos[idx];
 
