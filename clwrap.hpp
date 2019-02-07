@@ -100,13 +100,14 @@ public:
 	}
 #elif ENABLE_INTELGPU
 	bool loadprog(string fn) {
-		char *srcfile = loadfile(fn);
+		cl_ulong sz;
+		char *srcfile = loadfile(fn, sz);
 		cl_int err = CL_SUCCESS;
 
 		if (! srcfile)
 			return false;
 		cl::Program::Sources src;
-		src.push_back({srcfile,strlen(srcfile)});
+		src.push_back({srcfile,sz});
 		cl::Program p(ctx, src, &err);
 		if (err != CL_SUCCESS) {
 			cout << "Program failed" << err << endl;
