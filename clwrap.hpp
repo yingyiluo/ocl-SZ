@@ -56,9 +56,11 @@ private:
 	vector<struct arg_struct> kargs;
 
 public:
-	char *loadfile(string fn)
+	char *loadfile(string fn, cl_ulong &sz)
 	{
 		struct stat st;
+
+		sz = 0;
 
 		stat(fn.c_str(), &st);
 
@@ -75,7 +77,7 @@ public:
 			return NULL;
 		}
 		f0.seekg(0, f0.end);
-		cl_ulong sz = f0.tellg();
+		sz = f0.tellg();
 
 		f0.seekg(0, f0.beg);
 	
@@ -87,11 +89,12 @@ public:
 
 #ifdef ENABLE_INTELFPGA
 	bool loadprog(string fn) {
-		char *binfile = loadfile(fn);
+		cl_ulong sz;
+		char *binfile = loadfile(fn, sz);
 		if (! binfile)
 			return false;
 		cl::Program::Binaries bin;
-		bin.push_back({binfile,strlen(binfile)});
+		bin.push_back({binfile,sz});
 		prgs.push_back(cl::Program(ctx,devs,bin));
 		return true;
 	}
@@ -111,6 +114,7 @@ public:
 		}
 		p.build(devs);
 		prgs.push_back(p);
+
 		return true;
         }
 #else
@@ -143,7 +147,9 @@ public:
 			return;
 		}
 
+		/* set default platform id and device id */
 		platform_id = pid;
+
 #ifdef ENABLE_INTELGPU
 		for (int i = 0; i < (int)pfs.size(); i++) {
 			string pn = pfs[i].getInfo<CL_PLATFORM_NAME>();
@@ -162,7 +168,6 @@ public:
 
 		ctx = devs;
 
-
 		device_id = did;
 		program_id = 0; //
 	}
@@ -180,6 +185,7 @@ public:
 		cout << "[Devices]\n";
 		for (int i = 0; i < (int)devs.size(); i++) {
 			cout << "Device" << i << ": " << devs[i].getInfo<CL_DEVICE_NAME>();
+			// cout << " " << devs[i].getInfo<CL_DEVICE_MAX_COMPUTE_UNITS>() << " ";
 			if (i == device_id) cout << " [selected]";
 			cout << endl;
 		}
