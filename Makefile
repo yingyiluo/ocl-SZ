@@ -1,6 +1,6 @@
 
-PLATFORM = intelfpga
-#PLATFORM = intelgpu
+#PLATFORM = intelfpga
+PLATFORM = intelgpu
 
 ifeq ($(PLATFORM),intelfpga)
 CXX=g++
