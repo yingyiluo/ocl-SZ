@@ -113,7 +113,12 @@ public:
 			cout << "Program failed" << err << endl;
 			return false;
 		}
-		p.build(devs);
+		err = p.build(devs);
+		if (err != CL_SUCCESS) {
+			cout << "Program failed to build: " << err << endl;
+			cout << p.getBuildInfo<CL_PROGRAM_BUILD_LOG>(devs[device_id]);
+			return false;
+		}
 		prgs.push_back(p);
 
 		return true;
