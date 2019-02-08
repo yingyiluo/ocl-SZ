@@ -18,10 +18,12 @@ void *alignedMalloc(size_t size) {
         return result;
 }
 
-static void bench_pq()
+static void bench_pq(int kver)
 {
 	clWrap  cw;
-	FILE * input = fopen("input_testfloat_8_8_128.dat", "rb");
+	FILE * input = fopen("testdata/input_testfloat_8_8_128.dat", "rb");
+	char kfn[80];
+
 	if(!input) {
 		perror("failed to open input file");
 		exit(-1);
@@ -72,7 +74,13 @@ static void bench_pq()
 	cw.listPlatforms();
 	cw.listDevices();
 
-	cw.prepKernel("pred_quant_classic.aocx", "pred_and_quant");
+#ifdef ENABLE_INTELFPGA
+	snprintf(kfn, sizeof(kfn), "pred_quant_classic_v%d.aocx", kver);
+#else
+	snprintf(kfn, sizeof(kfn), "pred_quant_classic_v%d", kver);
+#endif
+	printf("kernel: %s\n", kfn);
+	cw.prepKernel(kfn, "pred_and_quant");
 
 #if 0
 __kernel void pred_and_quant(int r1, int r2, int r3, 
@@ -111,7 +119,7 @@ __kernel void pred_and_quant(int r1, int r2, int r3,
 
 	// verification
 	printf("Verification Start\n");
-	FILE * output = fopen("output_testfloat_8_8_128.dat", "rb");
+	FILE * output = fopen("testdata/output_testfloat_8_8_128.dat", "rb");
 	if(!output) {
 		perror("failed to open output file");
 		exit(-1);
@@ -134,8 +142,13 @@ __kernel void pred_and_quant(int r1, int r2, int r3,
 	}
 	if(memcmp(type, ref_type, bytes_type)) {
 		printf("type unmatch\n");
+		for(int i=0; i<(int)(bytes_type/sizeof(int)); i++) {
+			printf("%04d: %08x %08x\n", i, type[i], ref_type[i]);
+			if (type[i] != ref_type[i]) break;
+		}
 		success = false;
 	}
+
 	if(success)
 		printf("Verification Success\n");
 	else
@@ -159,7 +172,18 @@ __kernel void pred_and_quant(int r1, int r2, int r3,
 
 int main(int argc, char *argv[])
 {
-	bench_pq();
+	int kver = 2;
+
+	if (argc >= 2) {
+		kver = atoi(argv[1]);
+	}
+
+	if (kver < 1 || kver > 2) {
+		printf("kver should be 1 or 2\n");
+		return 1;
+	}
+
+	bench_pq(kver);
 
 	return 0;
 }
