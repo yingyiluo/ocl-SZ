@@ -16,6 +16,11 @@ CXXFLAGS = -Wall -O2 -g -std=gnu++0x -DENABLE_INTELGPU
 LDFLAGS = -lOpenCL
 endif
 
+ifneq (,$(SDK))
+CXXFLAGS += -I$(SDK)/include
+LDFLAGS += -L$(SDK)/lib64
+endif
+
 #LIBC214 = -L/opt/glibc-2.14/lib
 #LDFLAGS = $(shell aocl link-config) $(LIBC214)
 
