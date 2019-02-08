@@ -55,6 +55,7 @@ __kernel void pred_and_quant(int r1, int r2, int r3,
 	__local float pred_buffer_pos[PB_BLOCK_SIZE * PB_BLOCK_SIZE * PB_BLOCK_SIZE];
 	__local int type_pos[BLOCK_NUM_ELE];
 	__local float unpred_data_pos[BLOCK_NUM_ELE];
+
 	for(int n = 0; n < num_blocks; n++) {
 		int data_pos = i * BLOCK_SIZE * dim0_offset + j * BLOCK_SIZE * dim1_offset + k * BLOCK_SIZE;
 		for(int m = 0; m < PB_BLOCK_SIZE * PB_BLOCK_SIZE * PB_BLOCK_SIZE; m++)
@@ -111,7 +112,7 @@ __kernel void pred_and_quant(int r1, int r2, int r3,
 						- pred_buffer_pos[idx - strip_dim0_offset - 1] - pred_buffer_pos[idx - strip_dim0_offset - strip_dim1_offset] + pred_buffer_pos[idx - strip_dim0_offset - strip_dim1_offset - 1] 
 						: (reg_params[reg_params_pos] * ii + reg_params[reg_params_pos + params_offset_b] * jj + reg_params[reg_params_pos + params_offset_c] * kk + reg_params[reg_params_pos + params_offset_d]);									
 			double diff = curData - pred;
-			double itvNum = fabs(diff)/realPrecision + 1;
+			double itvNum = fabs((float)diff)/realPrecision + 1;
 			int stdIntvCap = indicator_n ? intvCapacity_sz : intvCapacity;
 			if (itvNum < stdIntvCap){
 				if (diff < 0) itvNum = -itvNum;
