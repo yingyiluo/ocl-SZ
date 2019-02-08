@@ -1,6 +1,6 @@
 /* 
 * Prediction & Quantization 
-* This kernel is for regression + mean Lorenzo algorithm.
+* This kernel is for regression + mean/classic Lorenzo algorithm.
 */
 
 // int * blockwise_unpred_count = (int *) malloc(num_blocks * sizeof(int));
@@ -130,7 +130,12 @@ __kernel void pred_and_quant(int r1, int r2, int r3,
 				pred_buffer_pos[idx] = curData;
 				unpred_data_pos[block_unpredictable_count ++] = curData;
 			}
-			
+						
+			#ifdef USE_MEAN
+			type_pos[m] = indicator_n && (fabs(curData - mean) <= realPrecision) ? 1 : type_pos[m];
+			pred_buffer_pos[idx] = indicator_n && (fabs(curData - mean) <= realPrecision) ? mean : pred_buffer_pos[idx];
+			#endif
+
 			idx += 1;
 			kk += 1;
 			if(kk == BLOCK_SIZE) {
