@@ -113,7 +113,11 @@ public:
 			cout << "Program failed" << err << endl;
 			return false;
 		}
+#ifdef USE_MEAN
+		err = p.build(devs, "-DUSE_MEAN");
+#else 
 		err = p.build(devs);
+#endif		
 		if (err != CL_SUCCESS) {
 			cout << "Program failed to build: " << err << endl;
 			cout << p.getBuildInfo<CL_PROGRAM_BUILD_LOG>(devs[device_id]);

@@ -2,6 +2,9 @@
 #PLATFORM = intelfpga
 PLATFORM = intelgpu
 
+#USE_MEAN = no
+USE_MEAN = yes
+
 ifeq ($(PLATFORM),intelfpga)
 CXX=g++
 CFLAGS = -Wall -O2 -g -Wno-unknown-pragmas
@@ -14,6 +17,10 @@ ifeq ($(PLATFORM),intelgpu)
 CXX=g++
 CXXFLAGS = -Wall -O2 -g -std=gnu++0x -DENABLE_INTELGPU
 LDFLAGS = -lOpenCL
+endif
+
+ifeq ($(USE_MEAN), yes)
+CXXFLAGS += -DUSE_MEAN
 endif
 
 ifneq (,$(SDK))

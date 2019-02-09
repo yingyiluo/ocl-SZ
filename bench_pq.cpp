@@ -75,9 +75,9 @@ static void bench_pq(int kver)
 	cw.listDevices();
 
 #ifdef ENABLE_INTELFPGA
-	snprintf(kfn, sizeof(kfn), "pred_quant_classic_v%d.aocx", kver);
+	snprintf(kfn, sizeof(kfn), "pred_quant_v%d.aocx", kver);
 #else
-	snprintf(kfn, sizeof(kfn), "pred_quant_classic_v%d", kver);
+	snprintf(kfn, sizeof(kfn), "pred_quant_v%d", kver);
 #endif
 	printf("kernel: %s\n", kfn);
 	cw.prepKernel(kfn, "pred_and_quant");
