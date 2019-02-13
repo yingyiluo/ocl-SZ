@@ -21,9 +21,13 @@ void *alignedMalloc(size_t size) {
 static void bench_pq(int kver)
 {
 	clWrap  cw;
-	FILE * input = fopen("testdata/input_testfloat_8_8_128.dat", "rb");
 	char kfn[80];
+	char infn[80];
+	char outfn[80];
 
+	snprintf(infn, sizeof(infn), "testdata/input_v%d_testfloat_8_8_128.dat", kver);
+	snprintf(outfn, sizeof(outfn), "testdata/output_v%d_testfloat_8_8_128.dat", kver);
+	FILE * input = fopen(infn, "rb");
 	if(!input) {
 		perror("failed to open input file");
 		exit(-1);
@@ -119,7 +123,7 @@ __kernel void pred_and_quant(int r1, int r2, int r3,
 
 	// verification
 	printf("Verification Start\n");
-	FILE * output = fopen("testdata/output_testfloat_8_8_128.dat", "rb");
+	FILE * output = fopen(outfn, "rb");
 	if(!output) {
 		perror("failed to open output file");
 		exit(-1);

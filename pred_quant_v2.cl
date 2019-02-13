@@ -27,7 +27,7 @@ __kernel void pred_and_quant(int r1, int r2, int r3,
 			float mean,
 			double realPrecision,
 			__global float *restrict oriData,
-			__global float *restrict reg_params,
+			__global float4 *restrict reg_params,
 			__global unsigned char *restrict indicator,
 			__global float *restrict unpredictable_data,   //output
 			__global int *restrict blockwise_unpred_count, //output
@@ -41,16 +41,11 @@ __kernel void pred_and_quant(int r1, int r2, int r3,
 	int num_elements = r1 * r2 * r3;
 	int dim0_offset = r2 * r3;
 	int dim1_offset = r3;
-	// move regression part out
-	int params_offset_b = num_blocks;
-	int params_offset_c = 2 * num_blocks;
-	int params_offset_d = 3 * num_blocks;
 	// for sz method
 	int strip_dim0_offset = PB_BLOCK_SIZE * PB_BLOCK_SIZE;
 	int strip_dim1_offset = PB_BLOCK_SIZE;
 	// invtCapacity is from external param: exe_params
 	int intvCapacity_sz = intvCapacity - 2;
-	int reg_params_pos = 0;
 	int i = 0, j = 0, k = 0;
 	__local float pred_buffer_pos[PB_BLOCK_SIZE * PB_BLOCK_SIZE * PB_BLOCK_SIZE];
 	__local int type_pos[BLOCK_NUM_ELE];
@@ -103,6 +98,7 @@ __kernel void pred_and_quant(int r1, int r2, int r3,
 		idx = PB_BLOCK_SIZE * PB_BLOCK_SIZE + PB_BLOCK_SIZE + 1;
 		int block_unpredictable_count = 0;
 		unsigned char indicator_n = indicator[n];
+		float4 reg_params_n = reg_params[n];
 		for(int m = 0; m < BLOCK_NUM_ELE; m++)
 			unpred_data_pos[m] = 0;
 		for(int m = 0; m < BLOCK_NUM_ELE; m++) {
@@ -110,7 +106,7 @@ __kernel void pred_and_quant(int r1, int r2, int r3,
 			float pred = indicator_n ? 
 						pred_buffer_pos[idx - 1] + pred_buffer_pos[idx - strip_dim1_offset] + pred_buffer_pos[idx - strip_dim0_offset] - pred_buffer_pos[idx - strip_dim1_offset - 1]
 						- pred_buffer_pos[idx - strip_dim0_offset - 1] - pred_buffer_pos[idx - strip_dim0_offset - strip_dim1_offset] + pred_buffer_pos[idx - strip_dim0_offset - strip_dim1_offset - 1] 
-						: (reg_params[reg_params_pos] * ii + reg_params[reg_params_pos + params_offset_b] * jj + reg_params[reg_params_pos + params_offset_c] * kk + reg_params[reg_params_pos + params_offset_d]);									
+						: (reg_params_n.s0 * ii + reg_params_n.s1 * jj + reg_params_n.s2 * kk + reg_params_n.s3);									
 			double diff = curData - pred;
 			double itvNum = fabs((float)diff)/realPrecision + 1;
 			int stdIntvCap = indicator_n ? intvCapacity_sz : intvCapacity;
@@ -150,7 +146,6 @@ __kernel void pred_and_quant(int r1, int r2, int r3,
 				idx += PB_BLOCK_SIZE;
 			}
 		}
-		reg_params_pos = indicator_n ? reg_params_pos : (reg_params_pos + 1);
 		blockwise_unpred_count[n] = block_unpredictable_count;
 		for(int m = 0; m < BLOCK_NUM_ELE; m++)
 			type[n * BLOCK_NUM_ELE + m]= type_pos[m];
