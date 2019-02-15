@@ -2,8 +2,8 @@
 #PLATFORM = intelfpga
 PLATFORM = intelgpu
 
-#USE_MEAN = no
-USE_MEAN = yes
+USE_MEAN = no
+#USE_MEAN = yes
 
 ifeq ($(PLATFORM),intelfpga)
 CXX=g++
@@ -35,10 +35,10 @@ INSTALL_PATH ?= $$HOME/local
 
 all: bench_pq
 
-bench_pq.o : bench_pq.cpp clwrap.hpp
+bench_pq.o : bench_pq.cpp clwrap.hpp bench_pq.hpp
 	$(CXX) -c $^ $(CXXFLAGS) $(LDFLAGS)
 
-bench_pq : bench_pq.cpp clwrap.hpp
+bench_pq : bench_pq.cpp clwrap.hpp bench_pq.hpp
 	$(CXX) -o $@ $^ $(CXXFLAGS) $(LDFLAGS)
 
 #dummy.aocx : dummy.cl

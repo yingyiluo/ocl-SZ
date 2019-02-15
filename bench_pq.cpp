@@ -1,5 +1,7 @@
 #include "clwrap.hpp"
+#include "bench_pq.hpp"
 #include <sys/time.h>
+#include <getopt.h>
 
 // A sample code for simpleOCLInit.hpp
 // Written by Kaz Yoshii <ky@anl.gov>
@@ -12,21 +14,35 @@
 #define BLOCK_NUM_ELE BLOCK_SIZE * BLOCK_SIZE * BLOCK_SIZE
 
 // Helper function
-void *alignedMalloc(size_t size) {
+static void *alignedMalloc(size_t size) {
         void *result = NULL;
         posix_memalign(&result, AOCL_ALIGNMENT, size);
         return result;
 }
 
-static void bench_pq(int kver)
+static void usage(void)
+{
+	puts("");
+	printf("Usage: bench_pq [options]\n");
+	printf("\n");
+	printf("-h : print this msg\n");
+	printf("-v version : kernel version number (default: 1)\n");
+	printf("-m mode  : kernel execution model (0 for single task, 1 for NDRange, default: 1)\n");
+	printf("-i input_file : the path to the input file\n");
+	printf("-c comparison_file : the path to the comparison file for verifiction\n");
+	puts("");
+}
+
+static void bench_pq(int kver, int ndr_mode, string input_fn, string comp_fn)
 {
 	clWrap  cw;
 	char kfn[80];
-	char infn[80];
-	char outfn[80];
+	char infn[input_fn.size() + 1];
+	char compfn[comp_fn.size() + 1];
 
-	snprintf(infn, sizeof(infn), "testdata/input_v%d_testfloat_8_8_128.dat", kver);
-	snprintf(outfn, sizeof(outfn), "testdata/output_v%d_testfloat_8_8_128.dat", kver);
+	strcpy(infn, input_fn.c_str());
+	strcpy(compfn, comp_fn.c_str());
+
 	FILE * input = fopen(infn, "rb");
 	if(!input) {
 		perror("failed to open input file");
@@ -78,11 +94,19 @@ static void bench_pq(int kver)
 	cw.listPlatforms();
 	cw.listDevices();
 
+	if(ndr_mode == 1) {
+#ifdef ENABLE_INTELFPGA
+	snprintf(kfn, sizeof(kfn), "pred_quant_ndr_v%d.aocx", kver);
+#else
+	snprintf(kfn, sizeof(kfn), "pred_quant_ndr_v%d", kver);
+#endif
+	} else {
 #ifdef ENABLE_INTELFPGA
 	snprintf(kfn, sizeof(kfn), "pred_quant_v%d.aocx", kver);
 #else
 	snprintf(kfn, sizeof(kfn), "pred_quant_v%d", kver);
 #endif
+	}
 	printf("kernel: %s\n", kfn);
 	cw.prepKernel(kfn, "pred_and_quant");
 
@@ -116,14 +140,20 @@ __kernel void pred_and_quant(int r1, int r2, int r3,
 	cw.appendArg(bytes_type, type,  cw.DEV2HOST);
 
 	printf("Execution Start\n");
-	cw.runKernel(1);
+	if(ndr_mode == 1) {
+		cl::NDRange ngsz(num_x, num_y, num_z);
+		cl::NDRange nlsz(LOCAL_X, LOCAL_Y, LOCAL_Z);
+		cw.runKernel(ngsz, nlsz);
+	} else {
+		cw.runKernel(1);
+	}
 
 	double runtime = cw.getKernelElapsedNanoSec();
 	printf("Kernel execution time = %.4fms\n", runtime * 1E-6);
 
 	// verification
 	printf("Verification Start\n");
-	FILE * output = fopen(outfn, "rb");
+	FILE * output = fopen(compfn, "rb");
 	if(!output) {
 		perror("failed to open output file");
 		exit(-1);
@@ -135,6 +165,8 @@ __kernel void pred_and_quant(int r1, int r2, int r3,
 	fread(ref_unpredictable_data, sizeof(float), bytes_unpredictable_data / sizeof(float), output);
 	fread(ref_blockwise_unpred_count, sizeof(int), bytes_blockwise_unpred_count / sizeof(int), output);
 	fread(ref_type, sizeof(int), bytes_type / sizeof(int), output);
+	fclose(output);
+
 	bool success = true;
 	if(memcmp(unpredictable_data, ref_unpredictable_data, bytes_unpredictable_data)) {
 		printf("unpredictable_data unmatch\n");
@@ -147,7 +179,7 @@ __kernel void pred_and_quant(int r1, int r2, int r3,
 	if(memcmp(type, ref_type, bytes_type)) {
 		printf("type unmatch\n");
 		for(int i=0; i<(int)(bytes_type/sizeof(int)); i++) {
-			printf("%04d: %08x %08x\n", i, type[i], ref_type[i]);
+			//printf("%04d: %08x %08x\n", i, type[i], ref_type[i]);
 			if (type[i] != ref_type[i]) break;
 		}
 		success = false;
@@ -158,7 +190,7 @@ __kernel void pred_and_quant(int r1, int r2, int r3,
 	else
 		printf("Verification Fail\n");
 
-	/*
+	
 	// debug
  	for(int i = 0; i < BLOCK_NUM_ELE * num_blocks; i++) {
 		if(unpredictable_data[i] != ref_unpredictable_data[i])
@@ -171,23 +203,69 @@ __kernel void pred_and_quant(int r1, int r2, int r3,
 		if(blockwise_unpred_count[i] != ref_blockwise_unpred_count[i])
 			printf("i: %d, %d, %d\n", i, blockwise_unpred_count[i], ref_blockwise_unpred_count[i]);
 	}
-	*/
-};
+	
+}
 
 int main(int argc, char *argv[])
 {
-	int kver = 2;
+	int kver = 1;
+	int ndr_mode = 1;
+	string input_file = "testdata/input_testfloat_8_8_128.dat";
+	string comparison_file = "testdata/output_testfloat_8_8_128.dat";
 
-	if (argc >= 2) {
-		kver = atoi(argv[1]);
-	}
+	while (1) {
+                int option_index = 0;
+                int opt;
+                static struct option long_options[] = {
+                        {"help",  no_argument,       0,  0 },
+                        {0,        0,                 0,  0 }
+                };
 
-	if (kver < 1 || kver > 2) {
-		printf("kver should be 1 or 2\n");
-		return 1;
-	}
+                opt = getopt_long(argc, argv, "hs:v:m:i:c:",
+                                  long_options, &option_index);
+                if (opt == -1)
+                        break;
 
-	bench_pq(kver);
+                switch (opt) {
+                case 0: /* long opt */
+                        if (strcmp(long_options[option_index].name, "shared") == 0) {
+                                usage();
+                                exit(1);
+                        }
+                        break;
+                case 'h':
+                        usage();
+                        exit(1);
+                case 'v':
+                        kver = atoi(optarg);
+                        break;
+                case 'm':
+                        ndr_mode = atoi(optarg);
+			if(ndr_mode != 0 && ndr_mode != 1) {
+				printf("-m could only be either 0 or 1\n");
+				exit(1);
+			}
+                        break;
+		case 'i':
+			input_file = string(optarg);
+			break;
+		case 'c':
+			comparison_file = string(optarg);
+			break;
+                default:
+                        printf("Unknown option: %c\n", opt);
+                        usage();
+                        exit(1);
+                }
+        }
+	printf("[bench_pq]\n");
+	string mode_str[2] = {"Single Task", "NDRange"};
+	printf("MODE=%d %s\n", ndr_mode, mode_str[ndr_mode].c_str());
+	printf("VERSION=%d\n", kver);
+	printf("INPUT_FILE=%s\n", input_file.c_str());
+	printf("COMPARISON_FILE=%s\n", comparison_file.c_str());
+
+	bench_pq(kver, ndr_mode, input_file, comparison_file);
 
 	return 0;
 }
