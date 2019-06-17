@@ -113,11 +113,9 @@ public:
 			cout << "Program failed" << err << endl;
 			return false;
 		}
-#ifdef USE_MEAN
-		err = p.build(devs, "-DUSE_MEAN");
-#else 
-		err = p.build(devs);
-#endif		
+		//err = p.build(devs);
+		err = p.build(devs, "-save-temps");
+		// err = p.build(devs, "-cl-intel-gtpin-rera");
 		if (err != CL_SUCCESS) {
 			cout << "Program failed to build: " << err << endl;
 			cout << p.getBuildInfo<CL_PROGRAM_BUILD_LOG>(devs[device_id]);
@@ -163,7 +161,12 @@ public:
 #ifdef ENABLE_INTELGPU
 		for (int i = 0; i < (int)pfs.size(); i++) {
 			string pn = pfs[i].getInfo<CL_PLATFORM_NAME>();
-			if (pn.find("Intel Gen OCL") != string::npos) {
+			//if (pn.find("Intel Gen OCL") != string::npos) {
+			if (pn.find("Intel") != string::npos) {
+				platform_id = i;
+				break;
+			}
+			if (pn.find("OpenCL HD Graphics") != string::npos) {
 				platform_id = i;
 				break;
 			}
@@ -180,6 +183,7 @@ public:
 
 		device_id = did;
 		program_id = 0; //
+
 	}
 
 	void listPlatforms(void) {
@@ -197,6 +201,16 @@ public:
 			cout << "Device" << i << ": " << devs[i].getInfo<CL_DEVICE_NAME>();
 			// cout << " " << devs[i].getInfo<CL_DEVICE_MAX_COMPUTE_UNITS>() << " ";
 			if (i == device_id) cout << " [selected]";
+#if 0
+			// to query shared virtual memory capabilities
+			cl_device_svm_capabilities svmcap;
+			devs[i].getInfo(CL_DEVICE_SVM_CAPABILITIES, &svmcap);
+			// CL_INVALID_VALUE is returned, no svm is supported
+			if( svmcap&CL_DEVICE_SVM_COARSE_GRAIN_BUFFER ) cout << "CGBUF ";
+			if( svmcap&CL_DEVICE_SVM_FINE_GRAIN_BUFFER ) cout << "FGBUF ";
+			if( svmcap&CL_DEVICE_SVM_FINE_GRAIN_SYSTEM ) cout << "FGSYS ";
+			if( svmcap&CL_DEVICE_SVM_ATOMICS ) cout << "ATOM "; // only for fine grain
+#endif
 			cout << endl;
 		}
 	}
@@ -219,7 +233,7 @@ public:
 			return false;
 		}
 
-		queue = cl::CommandQueue(ctx, devs[device_id], 0, &err);
+		queue = cl::CommandQueue(ctx, devs[device_id], CL_QUEUE_PROFILING_ENABLE, &err);
 		kernel = cl::Kernel(prgs[program_id], funcname, &err);
 		if (err != CL_SUCCESS) {
 			switch(err) {
@@ -311,6 +325,7 @@ public:
 				queue.enqueueReadBuffer(it->buf, CL_TRUE, 0, it->sz, it->data);
 			}
 		}
+		queue.finish();
 	}
 
 	void runKernel(int gsz, int lsz = 1) {
