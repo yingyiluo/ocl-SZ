@@ -3,6 +3,8 @@
 #include <sys/time.h>
 #include <getopt.h>
 
+using namespace std;
+
 // A sample code for simpleOCLInit.hpp
 // Written by Kaz Yoshii <ky@anl.gov>
 
@@ -35,7 +37,7 @@ static void usage(void)
 
 static void bench_pq(int kver, int ndr_mode, string input_fn, string comp_fn)
 {
-	clWrap  cw;
+	clwrap  cw;
 	char kfn[80];
 	char infn[input_fn.size() + 1];
 	char compfn[comp_fn.size() + 1];

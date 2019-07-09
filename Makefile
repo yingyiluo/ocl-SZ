@@ -9,13 +9,13 @@ ifeq ($(PLATFORM),intelfpga)
 CXX=g++
 CFLAGS = -Wall -O2 -g -Wno-unknown-pragmas
 CFLAGS += $(shell aocl compile-config)
-CXXFLAGS = $(CFLAGS) -std=c++11 -DENABLE_INTELFPGA
+CXXFLAGS = $(CFLAGS) -std=c++11
 LDFLAGS = $(shell aocl link-config)
 endif
 
 ifeq ($(PLATFORM),intelgpu)
 CXX=g++
-CXXFLAGS = -Wall -O2 -g -std=gnu++0x -DENABLE_INTELGPU
+CXXFLAGS = -Wall -O2 -g -std=gnu++0x
 LDFLAGS = -lOpenCL
 endif
 

@@ -3,17 +3,18 @@
 
 // clwrap.hpp is a C++ header file that wraps OpenCL host boilerplate
 // codes and provides some performance and power measurement hooks.
-// 
-// Written by Kaz Yoshii <ky@anl.gov>
 //
-// Tested platform:
-// Intel OpenCL SDK for embedded GPUs
+// Written by Kaz Yoshii <kazutomo@mcs.anl.gov>
+//
+// Tested platforms:
+// Intel OpenCL SDK for Intel embedded GPUs (Gen9)
 // Intel OpenCL SDK for FPGAs (e.g., Nallatech 385A)
 //
 
 #include <sys/stat.h>
 #include <iostream>
 #include <fstream>
+#include <cstdlib>
 #include <CL/cl.hpp>
 
 // e.g., local referece
@@ -24,14 +25,12 @@
 
 #define ENABLE_AOCL_MMD_HACK
 #ifdef ENABLE_AOCL_MMD_HACK
-extern "C" void aocl_mmd_card_info(const char *name , int id, 
-					   size_t sz, 
+extern "C" void aocl_mmd_card_info(const char *name , int id,
+					   size_t sz,
 					   void *v, size_t *retsize);
 #endif
 
-using namespace std;
-
-class clWrap {
+class clwrap {
 public:
 	// VALUE: pass by value, otherwise passed by reference
 	enum dir_enum { VALUE, HOST2DEV, DEV2HOST, DUPLEX };
@@ -42,92 +41,139 @@ public:
 		bool buffered;
 		cl::Buffer buf;
 	};
-
 private:
-	vector<cl::Platform> pfs;
-	vector<cl::Device> devs;
-	vector<cl::Program> prgs;
+	std::vector<cl::Platform> pfs; // initialized only in c'tor
+	std::vector<cl::Device> devs; // initialized only in c'tor
+	std::vector<cl::Program> prgs; // clear and push_back in prepKernel()
 	cl::Context ctx;
+	// selected ids
 	int platform_id, device_id, program_id;
 
 	cl::Event kernel_event;
 	cl::CommandQueue queue;
 	cl::Kernel kernel;
-	vector<struct arg_struct> kargs;
+	std::vector<struct arg_struct> kargs;
+	std::vector<char>  kernelbuf;
 
-public:
-	char *loadfile(string fn, cl_ulong &sz)
+	enum loader {
+		     SRC=0,
+		     BIN=1
+	};
+	typedef std::pair<std::string,enum loader> kext_t;
+	std::vector<kext_t>  kexts;
+
+	bool flag_dumpkernel;
+	int flag_verbose;
+
+	const char* getkernelbuf()
 	{
-		struct stat st;
-
-		sz = 0;
-
-		stat(fn.c_str(), &st);
-
-		if (!S_ISREG(st.st_mode)) {
-			cout << fn << " is not a regular file!" << endl;
-			return NULL;
-		}
-
-		// load binary and build prgs
-		ifstream f0(fn.c_str(), ifstream::binary);
-
-		if (! f0.good()) {
-			cout << "Unable to load " << fn << endl;
-			return NULL;
-		}
-		f0.seekg(0, f0.end);
-		sz = f0.tellg();
-
-		f0.seekg(0, f0.beg);
-	
-		char *f0c = new char [sz+1];
-		f0.read(f0c, sz);
-		f0c[sz] = 0;
-		return f0c;
+		return &kernelbuf[0];
+	}
+	size_t  getkernelbufsize()
+	{
+		return kernelbuf.size();
 	}
 
-#ifdef ENABLE_INTELFPGA
-	bool loadprog(string fn) {
-		cl_ulong sz;
-		char *binfile = loadfile(fn, sz);
-		if (! binfile)
+	// return 0 if success
+	bool loadkernel(std::string fn, bool nullterminate=false)
+	{
+		size_t sz;
+
+		std::ifstream f(fn.c_str(), std::ifstream::binary);
+
+		if (! f.is_open()) {
 			return false;
-		cl::Program::Binaries bin;
-		bin.push_back({binfile,sz});
-		prgs.push_back(cl::Program(ctx,devs,bin));
+		}
+
+		f.seekg(0, f.end);
+		sz = f.tellg();
+		f.seekg(0, f.beg);
+
+		if (nullterminate)
+			kernelbuf.resize(sz+1);
+		else
+			kernelbuf.resize(sz);
+
+		f.read(&kernelbuf[0], sz);
+
+		if (nullterminate)
+			kernelbuf[sz] = 0;
+
+		f.close();
 		return true;
 	}
-#elif ENABLE_INTELGPU
-	bool loadprog(string fn) {
-		cl_ulong sz;
-		char *srcfile = loadfile(fn, sz);
+
+	bool dumpkernel(std::string fn, const cl_ulong sz, const char *buf)
+	{
+		std::ofstream f(fn.c_str(), std::ostream::binary);
+		f.write(buf, sz);
+		return true;
+	}
+
+	bool fexists(const std::string fn)
+	{
+		struct stat st;
+		return (stat(fn.c_str(), &st) == 0);
+	}
+
+	bool loadprog_bin(std::string fn) {
+		if (! loadkernel(fn))
+			return false;
+
+		cl::Program::Binaries bin;
+		bin.push_back({getkernelbuf(),getkernelbufsize()});
+
+		std::vector<int> binaryStatus;
 		cl_int err = CL_SUCCESS;
 
-		if (! srcfile)
-			return false;
-		cl::Program::Sources src;
-		src.push_back({srcfile,sz});
-		cl::Program p(ctx, src, &err);
+		cl::Program p(ctx,devs,bin, &binaryStatus, &err);
+
+		// std::cout << "err=" << err << std::endl;
+		err = p.build(devs); // required even for binary
 		if (err != CL_SUCCESS) {
-			cout << "Program failed" << err << endl;
-			return false;
-		}
-		//err = p.build(devs);
-		err = p.build(devs, "-save-temps");
-		// err = p.build(devs, "-cl-intel-gtpin-rera");
-		if (err != CL_SUCCESS) {
-			cout << "Program failed to build: " << err << endl;
-			cout << p.getBuildInfo<CL_PROGRAM_BUILD_LOG>(devs[device_id]);
+			std::cout << "Program failed to build: " << err << std::endl;
+			std::cout << p.getBuildInfo<CL_PROGRAM_BUILD_LOG>(devs[device_id]);
 			return false;
 		}
 		prgs.push_back(p);
 
 		return true;
-        }
-#else
-#error "Add -DENABLE_INTELFPGA or -DENABLE_INTELGPU to compiler options"
+	}
+
+	bool loadprog_src(std::string fn) {
+		cl_int err = CL_SUCCESS;
+
+		if (! loadkernel(fn, true))
+			return false;
+
+		cl::Program::Sources src;
+		src.push_back({getkernelbuf(),getkernelbufsize()});
+		cl::Program p(ctx, src, &err);
+		if (err != CL_SUCCESS) {
+			std::cout << "Program failed" << err << std::endl;
+			return false;
+		}
+		err = p.build(devs);
+		// err = p.build(devs, "-cl-intel-gtpin-rera");
+		if (err != CL_SUCCESS) {
+			std::cout << "Program failed to build: " << err << std::endl;
+			std::cout << p.getBuildInfo<CL_PROGRAM_BUILD_LOG>(devs[device_id]);
+			return false;
+		}
+		prgs.push_back(p);
+
+#if 0
+		std::vector<unsigned long> kszs =
+			p.getInfo<CL_PROGRAM_BINARY_SIZES>();
+		std::vector<char*> bins;
+		bins.push_back( new char[*kszs.begin()] );
+		p.getInfo(CL_PROGRAM_BINARIES, &bins[0]);
+		savefile("test.bin", *kszs.begin(), bins[0] );
 #endif
+		return true;
+        }
+
+public:
 
 #ifdef AOCL_MMD_HACK
 	// technically this function should be called in other thread context
@@ -147,35 +193,62 @@ public:
 		return 0.0;
 	}
 #endif
+	// constructor
+	clwrap(int pid=0, int did=0) {
 
-	clWrap(int pid=0, int did=0) {
+		kexts = {{".aocx", BIN},
+			 {".bin", BIN},
+			 {".cl", SRC}
+		};
+
+		flag_dumpkernel = false;
+		flag_verbose = 0;
+
+		if(const char *env = std::getenv("CLW_VERBOSE"))
+			flag_verbose = std::atoi(env);
+		if(std::getenv("CLW_DUMPKERNEL"))
+			flag_verbose = true;
+
 		cl::Platform::get(&pfs);
 		if (pfs.size() == 0) {
-			cout << "No platform found" << endl;
+			std::cout << "No platform found" << std::endl;
 			return;
 		}
 
 		/* set default platform id and device id */
 		platform_id = pid;
 
-#ifdef ENABLE_INTELGPU
+
+		/*
+		  platform id
+
+		  Intel CPU: "Intel(R) CPU Runtime for OpenCL(TM) Applications"
+		  Intel CPU: "Experimental OpenCL 2.1 CPU Only Platform"
+		  Intel Gen GPU (NEO): "Intel(R) OpenCL HD Graphics"
+		  Intel FPGA: "Intel(R) FPGA SDK for OpenCL(TM)"
+		  pocl: "Portable Computing Language"
+		 */
+		std::string pfkey = "Intel";
+		if(const char *env = std::getenv("CLW_PF")) {
+			pfkey = env;
+			std::cout << "Platform search: " << pfkey << std::endl;
+		}
+		platform_id = -1;
 		for (int i = 0; i < (int)pfs.size(); i++) {
-			string pn = pfs[i].getInfo<CL_PLATFORM_NAME>();
-			//if (pn.find("Intel Gen OCL") != string::npos) {
-			if (pn.find("Intel") != string::npos) {
-				platform_id = i;
-				break;
-			}
-			if (pn.find("OpenCL HD Graphics") != string::npos) {
+			std::string pn = pfs[i].getInfo<CL_PLATFORM_NAME>();
+			if (pn.find(pfkey.c_str()) != std::string::npos) {
 				platform_id = i;
 				break;
 			}
 		}
-#endif
+		if (platform_id < 0) {
+			std::cout << "No platform found" << std::endl;
+			return;
+		}
 
 		pfs[platform_id].getDevices(CL_DEVICE_TYPE_ALL, &devs);
 		if (devs.size() == 0) {
-			cout << "No device found" << endl;
+			std::cout << "No device found" << std::endl;
 			return;
 		}
 
@@ -187,62 +260,92 @@ public:
 	}
 
 	void listPlatforms(void) {
-		cout << "[Platforms]\n";
+		std::cout << "[Platforms]\n";
 		for (int i = 0; i < (int)pfs.size(); i++) {
-			cout << i << ": " << pfs[i].getInfo<CL_PLATFORM_NAME>();
-			if (i == platform_id) cout << " [selected]";
-			cout << endl;
+			std::cout << i << ": " << pfs[i].getInfo<CL_PLATFORM_NAME>();
+			if (i == platform_id) std::cout << " [selected]";
+			std::cout << std::endl;
 		}
 	}
 
 	void listDevices(void) {
-		cout << "[Devices]\n";
+		std::cout << "[Devices]\n";
 		for (int i = 0; i < (int)devs.size(); i++) {
-			cout << "Device" << i << ": " << devs[i].getInfo<CL_DEVICE_NAME>();
-			// cout << " " << devs[i].getInfo<CL_DEVICE_MAX_COMPUTE_UNITS>() << " ";
-			if (i == device_id) cout << " [selected]";
+			std::cout << "Device" << i << ": " << devs[i].getInfo<CL_DEVICE_NAME>();
+			// std::cout << " " << devs[i].getInfo<CL_DEVICE_MAX_COMPUTE_UNITS>() << " ";
+			if (i == device_id) std::cout << " [selected]";
 #if 0
 			// to query shared virtual memory capabilities
 			cl_device_svm_capabilities svmcap;
 			devs[i].getInfo(CL_DEVICE_SVM_CAPABILITIES, &svmcap);
 			// CL_INVALID_VALUE is returned, no svm is supported
-			if( svmcap&CL_DEVICE_SVM_COARSE_GRAIN_BUFFER ) cout << "CGBUF ";
-			if( svmcap&CL_DEVICE_SVM_FINE_GRAIN_BUFFER ) cout << "FGBUF ";
-			if( svmcap&CL_DEVICE_SVM_FINE_GRAIN_SYSTEM ) cout << "FGSYS ";
-			if( svmcap&CL_DEVICE_SVM_ATOMICS ) cout << "ATOM "; // only for fine grain
+			if( svmcap&CL_DEVICE_SVM_COARSE_GRAIN_BUFFER ) std::cout << "CGBUF ";
+			if( svmcap&CL_DEVICE_SVM_FINE_GRAIN_BUFFER ) std::cout << "FGBUF ";
+			if( svmcap&CL_DEVICE_SVM_FINE_GRAIN_SYSTEM ) std::cout << "FGSYS ";
+			if( svmcap&CL_DEVICE_SVM_ATOMICS ) std::cout << "ATOM "; // only for fine grain
 #endif
-			cout << endl;
+			std::cout << std::endl;
 		}
 	}
 
 	bool prepKernel(const char *filename, const char *funcname) {
+		std::string fn = filename;
 		cl_int err = CL_SUCCESS;
-
-		string fn = filename;
 		size_t pos = fn.find_last_of(".");
+		kext_t kext_found = {"", BIN};
+
+		prgs.clear();
 
 		if (pos == std::string::npos) {
-#ifdef ENABLE_INTELFPGA
-			fn = fn + ".aocx";
-#elif  ENABLE_INTELGPU
-			fn = fn + ".cl";
-#endif
-		}
+			std::string tmpfn;
 
-		if (! loadprog(fn)) {
+			for (std::vector<kext_t>::iterator it = kexts.begin(); it != kexts.end(); ++it)  {
+				tmpfn = fn + (*it).first;
+				if (fexists(tmpfn)) {
+					fn = tmpfn;
+					kext_found = *it;
+					break;
+				}
+			}
+		} else {
+			// assume that the file extension is explicitly specified
+			std::string e = fn.substr(pos);
+
+			for (std::vector<kext_t>::iterator it = kexts.begin(); it != kexts.end(); ++it)  {
+				if (e == (*it).first) {
+					kext_found = *it;
+					break;
+				}
+			}
+
+		}
+		if (kext_found.first == "") {
+			std::cout << "Error: no kernel file found! " << filename << std::endl;
 			return false;
 		}
+
+		if (kext_found.second == BIN) {
+			if (! loadprog_bin(fn)) {
+				return false;
+			}
+		} else {
+			if (! loadprog_src(fn)) {
+				return false;
+			}
+		}
+
+		// create a command queue and kernel
 
 		queue = cl::CommandQueue(ctx, devs[device_id], CL_QUEUE_PROFILING_ENABLE, &err);
 		kernel = cl::Kernel(prgs[program_id], funcname, &err);
 		if (err != CL_SUCCESS) {
 			switch(err) {
-			case CL_INVALID_PROGRAM: cout << "CL_INVALID_PROGRAM\n"; break;
-			case CL_INVALID_PROGRAM_EXECUTABLE: cout << "CL_INVALID_PROGRAM_EXECUTABLE\n"; break;
-			case CL_INVALID_KERNEL_NAME: cout << "CL_INVALID_KERNEL_NAME\n"; break;
-			case CL_INVALID_KERNEL_DEFINITION: cout << "CL_INVALID_KERNEL_DEFINITION\n"; break;
+			case CL_INVALID_PROGRAM: std::cout << "CL_INVALID_PROGRAM\n"; break;
+			case CL_INVALID_PROGRAM_EXECUTABLE: std::cout << "CL_INVALID_PROGRAM_EXECUTABLE\n"; break;
+			case CL_INVALID_KERNEL_NAME: std::cout << "CL_INVALID_KERNEL_NAME\n"; break;
+			case CL_INVALID_KERNEL_DEFINITION: std::cout << "CL_INVALID_KERNEL_DEFINITION\n"; break;
 			default:
-				cout << "cl::Kernel() failed:" << err << endl;
+				std::cout << "cl::Kernel() failed:" << err << std::endl;
 			}
 			return false;
 		}
@@ -303,7 +406,7 @@ public:
 	void runKernel(cl::NDRange &gsz, cl::NDRange &lsz) {
 		// copy data to dev
 		// do timing later
-		for (vector<arg_struct>::iterator it = kargs.begin(); it != kargs.end(); ++it) {
+		for (std::vector<arg_struct>::iterator it = kargs.begin(); it != kargs.end(); ++it) {
 			if (it->dir == HOST2DEV || it->dir == DUPLEX)  {
 				queue.enqueueWriteBuffer(it->buf, CL_TRUE, 0, it->sz, it->data);
 			}
@@ -320,7 +423,7 @@ public:
 
 		// copy data from dev
 		// do timing later
-		for (vector<arg_struct>::iterator it = kargs.begin(); it != kargs.end(); ++it) {
+		for (std::vector<arg_struct>::iterator it = kargs.begin(); it != kargs.end(); ++it) {
 			if (it->dir == DEV2HOST || it->dir == DUPLEX)  {
 				queue.enqueueReadBuffer(it->buf, CL_TRUE, 0, it->sz, it->data);
 			}
