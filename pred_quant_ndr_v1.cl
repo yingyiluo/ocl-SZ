@@ -129,7 +129,7 @@ void pred_and_quant(int r1, int r2, int r3,
 						- pred_buffer_pos[local_id][idx - strip_dim0_offset - 1] - pred_buffer_pos[local_id][idx - strip_dim0_offset - strip_dim1_offset] + pred_buffer_pos[local_id][idx - strip_dim0_offset - strip_dim1_offset - 1] 
 						: (reg_params_n.s0 * ii + reg_params_n.s1 * jj + reg_params_n.s2 * kk + reg_params_n.s3);									
 			double diff = curData - pred;
-			double itvNum = fabs(diff)/realPrecision + 1;
+			double itvNum = fabs((float)diff)/realPrecision + 1;
 			int stdIntvCap = indicator_n ? intvCapacity_sz : intvCapacity;
 			if (itvNum < stdIntvCap){
 				if (diff < 0) itvNum = -itvNum;

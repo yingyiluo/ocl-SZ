@@ -10,6 +10,8 @@
 // Intel OpenCL SDK for Intel embedded GPUs (Gen9)
 // Intel OpenCL SDK for FPGAs (e.g., Nallatech 385A)
 //
+// LICENSE: BSD 3-clause
+//
 
 #include <sys/stat.h>
 #include <iostream>
@@ -32,6 +34,9 @@ extern "C" void aocl_mmd_card_info(const char *name , int id,
 
 class clwrap {
 public:
+	const int version_major = 0;
+	const int version_minor = 5;
+
 	// VALUE: pass by value, otherwise passed by reference
 	enum dir_enum { VALUE, HOST2DEV, DEV2HOST, DUPLEX };
 	struct arg_struct {
@@ -41,9 +46,12 @@ public:
 		bool buffered;
 		cl::Buffer buf;
 	};
+
+	typedef const char* here_t;
 private:
 	std::vector<cl::Platform> pfs; // initialized only in c'tor
 	std::vector<cl::Device> devs; // initialized only in c'tor
+	std::vector<cl::Device> dev_selected; // initialized only in c'tor
 	std::vector<cl::Program> prgs; // clear and push_back in prepKernel()
 	cl::Context ctx;
 	// selected ids
@@ -126,16 +134,20 @@ private:
 		std::vector<int> binaryStatus;
 		cl_int err = CL_SUCCESS;
 
-		cl::Program p(ctx,devs,bin, &binaryStatus, &err);
-
+		cl::Program p(ctx, dev_selected, bin, &binaryStatus, &err);
 		// std::cout << "err=" << err << std::endl;
-		err = p.build(devs); // required even for binary
+
 		if (err != CL_SUCCESS) {
+			std::cout << "fn=" << fn << std::endl;
 			std::cout << "Program failed to build: " << err << std::endl;
-			std::cout << p.getBuildInfo<CL_PROGRAM_BUILD_LOG>(devs[device_id]);
+			std::cout << p.getBuildInfo<CL_PROGRAM_BUILD_LOG>(dev_selected[0]);
 			return false;
 		}
 		prgs.push_back(p);
+
+		if (flag_verbose > 0) {
+			std::cout << "binary prog: " << fn << " is loaded.\n";
+		}
 
 		return true;
 	}
@@ -153,15 +165,18 @@ private:
 			std::cout << "Program failed" << err << std::endl;
 			return false;
 		}
-		err = p.build(devs);
-		// err = p.build(devs, "-cl-intel-gtpin-rera");
+		err = p.build(dev_selected);
+		// err = p.build(dev_selected, "-cl-intel-gtpin-rera");
 		if (err != CL_SUCCESS) {
 			std::cout << "Program failed to build: " << err << std::endl;
-			std::cout << p.getBuildInfo<CL_PROGRAM_BUILD_LOG>(devs[device_id]);
+			std::cout << p.getBuildInfo<CL_PROGRAM_BUILD_LOG>(dev_selected[0]);
 			return false;
 		}
 		prgs.push_back(p);
 
+		if (flag_verbose > 0) {
+			std::cout << "text prog: " << fn << " is loaded.\n";
+		}
 #if 0
 		std::vector<unsigned long> kszs =
 			p.getInfo<CL_PROGRAM_BINARY_SIZES>();
@@ -253,8 +268,10 @@ public:
 		}
 
 		ctx = devs;
-
 		device_id = did;
+
+		dev_selected.push_back(devs[device_id]);
+
 		program_id = 0; //
 
 	}
@@ -287,8 +304,13 @@ public:
 			std::cout << std::endl;
 		}
 	}
+	void info(void) {
+		std::cout << "clwrap version " << version_major << "." << version_minor << std::endl;
+		listPlatforms();
+		listDevices();
+	}
 
-	bool prepKernel(const char *filename, const char *funcname) {
+	bool prepKernel(const char *filename, const char *funcname = NULL) {
 		std::string fn = filename;
 		cl_int err = CL_SUCCESS;
 		size_t pos = fn.find_last_of(".");
@@ -297,7 +319,10 @@ public:
 		prgs.clear();
 
 		if (pos == std::string::npos) {
+			// the file extension is omitted
 			std::string tmpfn;
+
+			if (!funcname)  funcname = filename;
 
 			for (std::vector<kext_t>::iterator it = kexts.begin(); it != kexts.end(); ++it)  {
 				tmpfn = fn + (*it).first;
@@ -336,7 +361,7 @@ public:
 
 		// create a command queue and kernel
 
-		queue = cl::CommandQueue(ctx, devs[device_id], CL_QUEUE_PROFILING_ENABLE, &err);
+		queue = cl::CommandQueue(ctx, dev_selected[0], CL_QUEUE_PROFILING_ENABLE, &err);
 		kernel = cl::Kernel(prgs[program_id], funcname, &err);
 		if (err != CL_SUCCESS) {
 			switch(err) {
@@ -401,16 +426,40 @@ public:
 		return idx;
 	}
 
-
-
-	void runKernel(cl::NDRange &gsz, cl::NDRange &lsz) {
-		// copy data to dev
-		// do timing later
+	void write_to_dev(void) {
 		for (std::vector<arg_struct>::iterator it = kargs.begin(); it != kargs.end(); ++it) {
 			if (it->dir == HOST2DEV || it->dir == DUPLEX)  {
 				queue.enqueueWriteBuffer(it->buf, CL_TRUE, 0, it->sz, it->data);
 			}
 		}
+	}
+
+	void read_from_dev(void) {
+		for (std::vector<arg_struct>::iterator it = kargs.begin(); it != kargs.end(); ++it) {
+			if (it->dir == DEV2HOST || it->dir == DUPLEX)  {
+				queue.enqueueReadBuffer(it->buf, CL_TRUE, 0, it->sz, it->data);
+			}
+		}
+	}
+
+	void runProducer(void) {
+
+		cl::NDRange gsz(1);
+		cl::NDRange lsz(1);
+
+		write_to_dev();
+
+		queue.enqueueNDRangeKernel(
+				       kernel,
+				       cl::NullRange, // offset
+				       gsz,
+				       lsz,
+				       NULL,
+				       NULL);
+	}
+
+	void runKernel(cl::NDRange &gsz, cl::NDRange &lsz) {
+		write_to_dev();
 
 		queue.enqueueNDRangeKernel(
 				       kernel,
@@ -421,14 +470,9 @@ public:
 				       &kernel_event);
 		kernel_event.wait();
 
-		// copy data from dev
-		// do timing later
-		for (std::vector<arg_struct>::iterator it = kargs.begin(); it != kargs.end(); ++it) {
-			if (it->dir == DEV2HOST || it->dir == DUPLEX)  {
-				queue.enqueueReadBuffer(it->buf, CL_TRUE, 0, it->sz, it->data);
-			}
-		}
-		queue.finish();
+		read_from_dev();
+
+		queue.finish(); // needed?
 	}
 
 	void runKernel(int gsz, int lsz = 1) {
